@@ -72,9 +72,10 @@ app.MapGet("/booking", async (BookingDb db) =>
 
 app.MapPost("/get-rooms", async (Booking booking, BookingDb db) =>
 {
-    var room = await db.Rooms.Where(r => (
+    var room = await db.Rooms.Include(r=>r.bookings).Where(r => (
         r.adultCapacity >= booking.numberOfAdults &&
-        r.childCapacity >= booking.numberOfChild
+        r.childCapacity >= booking.numberOfChild &&
+        r.bookings.Where(b=>DateTime.Compare(b.checkInData,booking.checkInData) >-1).SingleOrDefault() == null
         )).SingleOrDefaultAsync();
     if (room is null)
     {
