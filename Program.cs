@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Serialization;
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<BookingDb>(opt => opt.UseInMemoryDatabase("BookingDb"));
 builder.Services.AddDatabaseDeveloperPageExceptionFilter();
@@ -36,7 +38,7 @@ app.MapPost("/rooms", async (Room room, BookingDb db) =>
 
 app.MapPut("/rooms/{id}", async (int id, Room inputRoom, BookingDb db) =>
 {
-    var room = await db.Rooms.FindAsync(id);
+    var room = await db.Rooms.Include(r => r.amenities).SingleOrDefaultAsync(r => r.id == id);
 
     if (room is null) return Results.NotFound();
 
@@ -44,6 +46,8 @@ app.MapPut("/rooms/{id}", async (int id, Room inputRoom, BookingDb db) =>
     room.adultCapacity = inputRoom.adultCapacity;
     room.childCapacity = inputRoom.childCapacity;
     room.price = inputRoom.price;
+    if (room.amenities is not null) db.Amenities.RemoveRange(room.amenities);
+    room.amenities = inputRoom.amenities;
 
     await db.SaveChangesAsync();
 
@@ -62,6 +66,34 @@ app.MapDelete("/rooms/{id}", async (int id, BookingDb db) =>
     return Results.NotFound();
 });
 
+app.MapGet("/booking", async (BookingDb db) =>
+    await db.Bookings.Include(b => b.room).ToListAsync()
+);
+
+app.MapPost("/get-rooms", async (Booking booking, BookingDb db) =>
+{
+    var room = await db.Rooms.Where(r => (
+        r.adultCapacity >= booking.numberOfAdults &&
+        r.childCapacity >= booking.numberOfChild
+        )).SingleOrDefaultAsync();
+    if (room is null)
+    {
+        return Results.Ok(new { });
+    }
+    return Results.Ok(room);
+}
+);
+
+app.MapPost("/booking", async (Booking booking, BookingDb db) =>
+{
+    var room = db.Rooms.Find(booking.roomId);
+    booking.room = room;
+    db.Bookings.Add(booking);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/booking/{booking.id}", booking);
+});
+
 app.Run();
 
 class Room
@@ -71,7 +103,10 @@ class Room
     public int adultCapacity { get; set; }
     public int childCapacity { get; set; }
     public int price { get; set; }
-    public ICollection<Amenities> amenities { get; set; }
+    public ICollection<Amenities>? amenities { get; set; }
+
+    [JsonIgnore]
+    public ICollection<Booking>? bookings { get; set; }
 }
 
 class Amenities
@@ -80,10 +115,28 @@ class Amenities
     public string? text { get; set; }
 }
 
+class Booking
+{
+    public int id { get; set; }
+    public string? guestFirstName { get; set; }
+    public string? guestLastName { get; set; }
+    public int numberOfAdults { get; set; }
+    public int numberOfChild { get; set; }
+    public DateTime checkInData { get; set; }
+    public DateTime checkOutData { get; set; }
+    public string? status { get; set; }
+    public Room? room { get; set; }
+    public int roomId { get; set; }
+}
+
 class BookingDb : DbContext
 {
     public BookingDb(DbContextOptions<BookingDb> options)
         : base(options) { }
 
     public DbSet<Room> Rooms => Set<Room>();
+
+    public DbSet<Amenities> Amenities => Set<Amenities>();
+
+    public DbSet<Booking> Bookings => Set<Booking>();
 }
